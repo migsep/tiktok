@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Hyperfluid — Cinematic Audio Reactive</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; height:100vh; }
+canvas { display:block; }
+
+#ui {
+  position:fixed; bottom:32px; left:50%; transform:translateX(-50%);
+  display:flex; gap:12px; align-items:center;
+  font-family:'Helvetica Neue', sans-serif;
+  z-index:10;
+}
+
+#tap {
+  padding:10px 28px;
+  background:rgba(255,255,255,0.08);
+  border:1px solid rgba(255,255,255,0.15);
+  color:rgba(255,255,255,0.6);
+  font-size:12px;
+  letter-spacing:0.2em;
+  text-transform:uppercase;
+  cursor:pointer;
+  backdrop-filter:blur(8px);
+  border-radius:2px;
+  transition:all .3s;
+}
+#tap:hover { background:rgba(255,255,255,0.14); color:#fff; }
+#tap.active { color:rgba(100,255,180,0.8); border-color:rgba(100,255,180,0.3); }
+
+#bars {
+  display:flex; gap:3px; align-items:flex-end; height:20px;
+}
+.bar {
+  width:3px; background:rgba(100,200,255,0.5);
+  border-radius:1px;
+  transition:height .05s;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div id="bars">
+    <div class="bar" style="height:4px"></div>
+    <div class="bar" style="height:8px"></div>
+    <div class="bar" style="height:4px"></div>
+  </div>
+  <div id="tap">Activer le micro</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass }      from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { ShaderPass }      from "three/addons/postprocessing/ShaderPass.js";
+
+/* ─── Canvas sizing: 9:16 vertical ─── */
+const W = Math.min(window.innerWidth, window.innerHeight * 9/16);
+const H = Math.min(window.innerHeight, window.innerWidth * 16/9);
+
+/* ─── Renderer ─── */
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: 'high-performance',
+  alpha: false
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.Camera(); // identity / orthographic fullscreen
+
+/* ─── Uniforms ─── */
+const uniforms = {
+  u_time:       { value: 0 },
+  u_resolution: { value: new THREE.Vector2(W * Math.min(devicePixelRatio,2), H * Math.min(devicePixelRatio,2)) },
+  u_bass:       { value: 0 },
+  u_mid:        { value: 0 },
+  u_treble:     { value: 0 },
+  u_audio:      { value: 0 },
+};
+
+/* ─── Main PBR Raymarcher ─── */
+const mainMat = new THREE.ShaderMaterial({
+  uniforms,
+  depthTest: false,
+  depthWrite: false,
+
+  vertexShader: /* glsl */`
+    void main() {
+      gl_Position = vec4(position, 1.0);
+    }
+  `,
+
+  fragmentShader: /* glsl */`
+    precision highp float;
+
+    uniform float u_time;
+    uniform vec2  u_resolution;
+    uniform float u_bass;
+    uniform float u_mid;
+    uniform float u_treble;
+    uniform float u_audio;
+
+    #define PI     3.14159265359
+    #define TAU    6.28318530718
+    #define MAX_STEPS 140
+    #define MAX_DIST  9.0
+    #define SURF_DIST 0.0004
+
+    /* ═══════════════ NOISE ═══════════════ */
+    float hash(vec3 p) {
+      p = fract(p * 0.31830988 + 0.1);
+      p *= 17.0;
+      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+
+    float noise(vec3 p) {
+      vec3 i = floor(p), f = fract(p);
+      f = f*f*(3.0-2.0*f);
+      return mix(
+        mix(mix(hash(i),             hash(i+vec3(1,0,0)), f.x),
+            mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
+        mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+            mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
+    }
+
+    /* Rotated octave FBM */
+    const mat3 ROT = mat3(
+       0.00, 0.80, 0.60,
+      -0.80, 0.36,-0.48,
+      -0.60,-0.48, 0.64
+    );
+
+    float fbm(vec3 p) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 7; i++) {
+        v += a * noise(p);
+        p  = ROT * p * 2.02;
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    /* Quilez domain-warp (3 layers = insane detail) */
+    float fbmWarp(vec3 p, float t) {
+      vec3 q = vec3(
+        fbm(p + vec3(0.0,  0.0,  0.0) + t * 0.4),
+        fbm(p + vec3(5.2,  1.3,  2.8) + t * 0.3),
+        fbm(p + vec3(1.7,  9.2,  4.1) + t * 0.5)
+      );
+      vec3 r = vec3(
+        fbm(p + 4.0*q + vec3(1.7, 9.2, 0.0) - t * 0.2),
+        fbm(p + 4.0*q + vec3(8.3, 2.8, 3.1) - t * 0.3),
+        fbm(p + 4.0*q + vec3(5.1, 7.4, 1.9) + t * 0.1)
+      );
+      return fbm(p + 4.2 * r);
+    }
+
+    /* ═══════════════ SDF SCENE ═══════════════ */
+    float smin(float a, float b, float k) {
+      float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+      return mix(b, a, h) - k*h*(1.0-h);
+    }
+
+    float map(vec3 p) {
+      float t = u_time * 0.28;
+
+      /* Domain-warp the entire space for fluid turbulence */
+      float warp = 0.22 * (1.0 + u_bass * 1.8);
+      vec3 wp = p + warp * vec3(
+        fbm(p * 1.3 + t * 0.7),
+        fbm(p * 1.3 + t * 0.6 + 4.1),
+        fbm(p * 1.3 + t * 0.8 + 8.7)
+      );
+
+      /* Core morphing liquid body */
+      float radius = 1.15 + u_bass * 0.45 + 0.07 * sin(t * 1.8);
+      float core = length(wp) - radius;
+
+      /* Fine-grained surface texture (two scales) */
+      float detail1 = fbmWarp(wp * 0.9 + t * 0.5, t);
+      float detail2 = fbm(wp * 2.2 - t * 0.9) * 0.5;
+      float disp = (detail1 * 0.38 + detail2 * 0.14) * (0.5 + u_audio * 0.9);
+
+      /* Orbiting satellite blobs (audio-reactive orbit speeds) */
+      float a1 = t * 0.9  + u_bass  * 2.5;
+      float a2 = t * -0.6 + u_mid   * 3.0;
+      float a3 = t * 1.2  + u_treble* 4.0;
+      float a4 = t * -0.4;
+
+      vec3 s1 = vec3(sin(a1)*0.75,       cos(a1*1.4)*0.55,  cos(a1)*0.6);
+      vec3 s2 = vec3(cos(a2)*0.65,       sin(a2)*0.80,      sin(a2*0.9)*0.5);
+      vec3 s3 = vec3(sin(a3+1.0)*0.85,   cos(a3)*0.30,      sin(a3*0.7)*0.7);
+      vec3 s4 = vec3(cos(a4*0.8)*0.55,   sin(a4*1.2)*0.65,  cos(a4+2.0)*0.8);
+
+      float b1 = length(wp - s1) - (0.30 + u_mid   * 0.18);
+      float b2 = length(wp - s2) - (0.25 + u_audio * 0.14);
+      float b3 = length(wp - s3) - (0.22 + u_bass  * 0.22);
+      float b4 = length(wp - s4) - (0.18 + u_treble* 0.20);
+
+      float blobs = smin(core, b1, 0.55);
+      blobs = smin(blobs, b2, 0.48);
+      blobs = smin(blobs, b3, 0.40);
+      blobs = smin(blobs, b4, 0.35);
+
+      return blobs + disp;
+    }
+
+    /* Tetrahedron normal (4 samples only, accurate) */
+    vec3 getNormal(vec3 p) {
+      const float e = 0.0006;
+      const vec2  h = vec2(e, -e);
+      return normalize(
+        h.xyy * map(p + h.xyy) + h.yyx * map(p + h.yyx) +
+        h.yxy * map(p + h.yxy) + h.xxx * map(p + h.xxx)
+      );
+    }
+
+    float rayMarch(vec3 ro, vec3 rd, out int steps) {
+      float dO = 0.0;
+      for (int i = 0; i < MAX_STEPS; i++) {
+        steps = i;
+        float dS = map(ro + rd * dO);
+        dO += dS * 0.72;
+        if (dO > MAX_DIST || abs(dS) < SURF_DIST) break;
+      }
+      return dO;
+    }
+
+    /* ═══════════════ PBR BRDF ═══════════════ */
+    float D_GGX(float NoH, float a2) {
+      float d = NoH * NoH * (a2 - 1.0) + 1.0;
+      return a2 / (PI * d * d + 1e-6);
+    }
+
+    vec3 F_Schlick(float cosA, vec3 F0) {
+      return F0 + (1.0 - F0) * pow(clamp(1.0 - cosA, 0.0, 1.0), 5.0);
+    }
+
+    float G_Smith(float NoV, float NoL, float a) {
+      float k = a * 0.5;
+      return (NoV/(NoV*(1.0-k)+k)) * (NoL/(NoL*(1.0-k)+k));
+    }
+
+    vec3 CookTorrance(float NoL, float NoV, float NoH, float VoH,
+                      vec3 F0, float roughness) {
+      float a  = roughness * roughness;
+      float a2 = a * a;
+      float D  = D_GGX(NoH, a2);
+      vec3  F  = F_Schlick(VoH, F0);
+      float G  = G_Smith(max(NoV,0.001), max(NoL,0.001), a);
+      return D * F * G / (4.0 * max(NoV,0.001) * max(NoL,0.001) + 1e-6);
+    }
+
+    /* Thin-film iridescence (interference) */
+    vec3 iridescence(float viewAngle, float thickness) {
+      float phi = 2.0 * PI * thickness * viewAngle;
+      return 0.5 + 0.5 * cos(vec3(phi, phi - TAU/3.0, phi - TAU*2.0/3.0));
+    }
+
+    /* ACES filmic tonemapper */
+    vec3 ACESFilm(vec3 x) {
+      const float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+      return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+    }
+
+    /* ═══════════════ MAIN ═══════════════ */
+    void main() {
+      vec2 uv = (gl_FragCoord.xy - 0.5*u_resolution) / u_resolution.y;
+
+      /* Slowly orbiting camera */
+      float ct = u_time * 0.06;
+      vec3 ro = vec3(sin(ct)*3.2, 0.35*sin(ct*0.71), cos(ct)*3.2);
+      vec3 fw = normalize(-ro);
+      vec3 ri = normalize(cross(vec3(0,1,0), fw));
+      vec3 up = cross(fw, ri);
+      vec3 rd = normalize(fw*1.5 + ri*uv.x + up*uv.y);
+
+      int steps;
+      float d = rayMarch(ro, rd, steps);
+
+      /* ── Background: deep-space nebula ── */
+      float bgW   = fbm(vec3(uv*1.4, u_time*0.03));
+      float bgW2  = fbm(vec3(uv*2.2 + 3.7, u_time*0.02));
+      vec3 bg = mix(
+        vec3(0.00, 0.01, 0.04),
+        mix(vec3(0.04, 0.00, 0.08), vec3(0.0, 0.05, 0.12), bgW2),
+        bgW * bgW
+      );
+      /* Star field */
+      float starHash = hash(vec3(floor(uv*600.0), 0.0));
+      float starMask = step(0.995, starHash);
+      float starBright = hash(vec3(floor(uv*600.0), 1.0));
+      bg += starMask * vec3(0.8, 0.9, 1.0) * (0.4 + 0.6*starBright)
+           * (0.7 + 0.3*sin(u_time * (2.0 + starBright*4.0)));
+
+      vec3 col = bg;
+
+      if (d < MAX_DIST) {
+        vec3 p = ro + rd * d;
+        vec3 n = getNormal(p);
+        vec3 v = -rd;
+
+        float NoV = max(dot(n, v), 0.001);
+
+        /* Dynamic surface roughness + metallic F0 */
+        float roughness = 0.06 + fbm(p*3.5 + u_time*0.25) * 0.12;
+        /* Iridescent liquid metal (not pure gold, shifts color) */
+        float iriThick = 0.2 + fbm(p*2.0) * 0.8 + u_audio * 0.6;
+        vec3 iriColor  = iridescence(NoV, iriThick * 1200.0);
+        /* Base F0: liquid metal that shifts with iridescence */
+        vec3 F0 = mix(vec3(0.92, 0.90, 0.87), iriColor, 0.55);
+
+        /* ── 5 lights ── */
+        vec3 lDirs[5];
+        vec3 lCols[5];
+
+        lDirs[0] = normalize(vec3( 1.8,  2.2,  0.8));
+        lCols[0] = vec3(1.00, 0.88, 0.55) * (2.2 + u_bass * 4.0);   // warm gold key
+
+        lDirs[1] = normalize(vec3(-1.6,  0.4, -1.2));
+        lCols[1] = vec3(0.10, 0.55, 1.00) * (1.8 + u_mid * 2.5);    // cool cyan fill
+
+        lDirs[2] = normalize(vec3( 0.2, -1.2, -2.0));
+        lCols[2] = vec3(0.85, 0.10, 1.00) * (1.2 + u_treble * 3.5); // magenta rim
+
+        lDirs[3] = normalize(vec3(-0.5, -2.0,  1.0));
+        lCols[3] = vec3(0.00, 1.00, 0.75) * (0.9 + u_mid * 1.5);    // teal under
+
+        lDirs[4] = normalize(vec3( 2.0, -0.5, -1.5));
+        lCols[4] = vec3(1.00, 0.30, 0.10) * (0.7 + u_bass * 1.5);   // ember accent
+
+        vec3 result = vec3(0.0);
+
+        for (int li = 0; li < 5; li++) {
+          vec3 l = lDirs[li];
+          vec3 h = normalize(v + l);
+          float NoL = max(dot(n, l), 0.0);
+          float NoH = max(dot(n, h), 0.0);
+          float VoH = max(dot(v, h), 0.001);
+
+          vec3 spec = CookTorrance(NoL, NoV, NoH, VoH, F0, roughness);
+          /* Nearly fully metallic: minimal diffuse */
+          vec3 F    = F_Schlick(VoH, F0);
+          vec3 diff = (1.0 - F) * vec3(0.015);
+
+          result += (diff + spec) * lCols[li] * NoL;
+        }
+
+        /* Iridescence additive layer */
+        result += iriColor * 0.25 * (1.0 + u_audio * 1.8);
+
+        /* Subsurface scattering (back-lit translucency) */
+        float sss = pow(max(dot(-rd, lDirs[0]), 0.0), 4.0);
+        float thickFrac = float(steps) / float(MAX_STEPS);
+        vec3 sssCol = mix(vec3(0.2, 0.7, 1.0), vec3(0.8, 0.3, 1.0), u_bass);
+        result += sssCol * sss * exp(-thickFrac * 3.0) * (0.4 + u_audio * 0.8);
+
+        /* Volumetric inner glow */
+        float innerG = exp(-d * 0.6) * (0.4 + u_audio * 1.8);
+        result += mix(vec3(0.1, 0.5, 1.0), vec3(0.5, 0.1, 1.0), u_bass) * innerG * 0.4;
+
+        /* Ambient occlusion proxy */
+        float ao = 1.0 - thickFrac * 0.6;
+        vec3 amb = mix(vec3(0.04, 0.01, 0.08), vec3(0.02, 0.06, 0.15), n.y*0.5+0.5);
+        result += amb * ao * 0.4;
+
+        /* Environment reflection (fake IBL via FBM sky) */
+        vec3 refl     = reflect(rd, n);
+        float envF    = fbm(refl*1.5 + u_time*0.08);
+        float envF2   = fbm(refl*3.0 - u_time*0.05);
+        vec3 envColor = mix(
+          mix(vec3(0.01, 0.04, 0.18), vec3(0.10, 0.00, 0.20), envF2),
+          vec3(0.05, 0.25, 0.60), envF * envF
+        );
+        vec3 Fenv = F_Schlick(NoV, F0);
+        result += envColor * Fenv * 0.55;
+
+        /* Caustic shimmer on surface */
+        float caust = fbm(p*4.0 + vec3(u_time*0.6, -u_time*0.4, u_time*0.5));
+        caust = pow(caust, 3.0);
+        result += vec3(0.6, 0.9, 1.0) * caust * 0.3 * (1.0 + u_treble * 1.5);
+
+        col = result;
+
+        /* Edge glow blending with background */
+        float edge = pow(1.0 - NoV, 4.0);
+        col = mix(col, col + bg * 0.3, edge * 0.4);
+      } else {
+        /* Lens flare / light bleed from main light direction */
+        float t = u_time * 0.06;
+        vec3 lo = vec3(sin(t)*3.2, 0.35*sin(t*0.71), cos(t)*3.2);
+        vec3 lFlare = normalize(vec3(1.8, 2.2, 0.8));
+        float flareD = max(dot(rd, lFlare), 0.0);
+        col += vec3(1.0, 0.85, 0.5) * pow(flareD, 24.0) * (0.12 + u_bass * 0.3);
+        col += vec3(0.3, 0.6, 1.0) * pow(flareD, 80.0) * (0.05 + u_bass * 0.15);
+      }
+
+      /* ═══ POST-PROCESSING (in-shader) ═══ */
+
+      /* Film grain (temporal) */
+      float gSeed = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233))) * 43758.5453 + u_time * 137.0);
+      float grain = (gSeed - 0.5) * 0.035;
+      col += grain;
+
+      /* ACES filmic tone mapping */
+      col = ACESFilm(col * 1.4);
+
+      /* Gamma */
+      col = pow(max(col, 0.0), vec3(1.0/2.2));
+
+      /* Vignette */
+      float vig = 1.0 - dot(uv*0.85, uv*0.85);
+      vig = pow(max(vig, 0.0), 0.55);
+      col *= vig;
+
+      /* Color grade: deep teal shadows, warm gold highlights */
+      float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      vec3 shadowTint    = vec3(0.80, 0.90, 1.10);
+      vec3 highlightTint = vec3(1.10, 1.00, 0.85);
+      col *= mix(shadowTint, highlightTint, lum);
+
+      /* Subtle halation (red channel bleeds slightly) */
+      col.r *= 1.02;
+
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    }
+  `
+});
+
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), mainMat));
+
+/* ─── Post-processing ─── */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+/* Bloom — restrained, luminous */
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(W * devicePixelRatio, H * devicePixelRatio),
+  0.9,   // strength
+  0.35,  // radius
+  0.78   // threshold
+);
+composer.addPass(bloom);
+
+/* Chromatic aberration + CRT micro-curve post pass */
+const chromaPass = new ShaderPass({
+  uniforms: {
+    tDiffuse:  { value: null },
+    u_time:    { value: 0 },
+    u_audio:   { value: 0 },
+    u_res:     { value: new THREE.Vector2(W, H) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    precision highp float;
+    uniform sampler2D tDiffuse;
+    uniform float u_time;
+    uniform float u_audio;
+    uniform vec2  u_res;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 uv = vUv;
+
+      /* Subtle barrel distortion */
+      vec2 c = uv - 0.5;
+      float barrel = 0.015 + u_audio * 0.008;
+      c *= 1.0 + barrel * dot(c, c);
+      uv = c + 0.5;
+
+      /* Chromatic aberration — radial, scales with audio */
+      float aberr = (0.0012 + u_audio * 0.003) * length(c);
+      vec2 rUv = uv + c * aberr;
+      vec2 bUv = uv - c * aberr;
+
+      float r = texture2D(tDiffuse, clamp(rUv, 0.0, 1.0)).r;
+      float g = texture2D(tDiffuse, clamp(uv,  0.0, 1.0)).g;
+      float b = texture2D(tDiffuse, clamp(bUv, 0.0, 1.0)).b;
+
+      vec3 col = vec3(r, g, b);
+
+      /* Scanline micro-texture (very subtle) */
+      float scan = 0.5 + 0.5 * sin(uv.y * u_res.y * 2.0);
+      col *= 1.0 - 0.012 * scan;
+
+      /* Edge mask (hide distortion artifacts) */
+      float edge = smoothstep(0.0, 0.04, uv.x) * smoothstep(0.0, 0.04, 1.0-uv.x)
+                 * smoothstep(0.0, 0.04, uv.y) * smoothstep(0.0, 0.04, 1.0-uv.y);
+      col *= edge;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+});
+composer.addPass(chromaPass);
+
+/* ─── Audio setup ─── */
+let audioCtx, analyser, dataArray;
+const FFT = 512;
+
+async function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser  = audioCtx.createAnalyser();
+  analyser.fftSize = FFT;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+  dataArray = new Uint8Array(analyser.frequencyBinCount);
+  document.getElementById('tap').textContent  = 'Micro actif';
+  document.getElementById('tap').classList.add('active');
+}
+
+const tapBtn = document.getElementById('tap');
+tapBtn.addEventListener('click', async () => {
+  if (!audioCtx) {
+    try { await initAudio(); } catch(e) { tapBtn.textContent='Accès refusé'; }
+  }
+});
+
+/* Animated bars UI */
+const bars = document.querySelectorAll('.bar');
+let barTime = 0;
+
+function updateBars(bass, mid, treble) {
+  const vals = analyser
+    ? [bass * 20 + 3, mid * 20 + 5, treble * 20 + 3]
+    : [
+        4 + 5 * Math.abs(Math.sin(barTime * 1.3)),
+        8 + 5 * Math.abs(Math.sin(barTime * 1.9 + 1)),
+        4 + 5 * Math.abs(Math.sin(barTime * 2.4 + 2))
+      ];
+  bars.forEach((b, i) => b.style.height = vals[i] + 'px');
+}
+
+/* ─── Render loop ─── */
+let smooth_bass = 0, smooth_mid = 0, smooth_treble = 0, smooth_audio = 0;
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  const T = t * 0.001;
+  barTime = T;
+
+  uniforms.u_time.value = T;
+  chromaPass.uniforms.u_time.value = T;
+
+  if (analyser) {
+    analyser.getByteFrequencyData(dataArray);
+    const bin = dataArray.length;
+    const third = Math.floor(bin / 3);
+
+    let sumB = 0, sumM = 0, sumTr = 0;
+    for (let i = 0;          i < third;      i++) sumB  += dataArray[i];
+    for (let i = third;      i < third*2;    i++) sumM  += dataArray[i];
+    for (let i = third*2;    i < bin;        i++) sumTr += dataArray[i];
+
+    const rawB  = (sumB  / third)      / 255;
+    const rawM  = (sumM  / third)      / 255;
+    const rawTr = (sumTr / (bin-third*2)) / 255;
+    const rawA  = (rawB + rawM + rawTr) / 3;
+
+    const LB = 0.15, LF = 1 - LB;
+    smooth_bass   = smooth_bass   * LF + rawB  * LB;
+    smooth_mid    = smooth_mid    * LF + rawM  * LB;
+    smooth_treble = smooth_treble * LF + rawTr * LB;
+    smooth_audio  = smooth_audio  * LF + rawA  * LB;
+
+    updateBars(smooth_bass, smooth_mid, smooth_treble);
+  } else {
+    smooth_audio  = 0.08 + 0.04 * Math.sin(T * 0.7);
+    smooth_bass   = 0.06 + 0.04 * Math.sin(T * 0.4);
+    smooth_mid    = 0.05 + 0.03 * Math.sin(T * 0.9 + 1);
+    smooth_treble = 0.04 + 0.02 * Math.sin(T * 1.3 + 2);
+    updateBars(0, 0, 0);
+  }
+
+  uniforms.u_bass.value   = smooth_bass;
+  uniforms.u_mid.value    = smooth_mid;
+  uniforms.u_treble.value = smooth_treble;
+  uniforms.u_audio.value  = smooth_audio;
+  chromaPass.uniforms.u_audio.value = smooth_audio;
+
+  composer.render();
+}
+animate(0);
+
+/* ─── Resize ─── */
+window.addEventListener('resize', () => {
+  const nW = Math.min(window.innerWidth, window.innerHeight * 9/16);
+  const nH = Math.min(window.innerHeight, window.innerWidth * 16/9);
+  renderer.setSize(nW, nH);
+  composer.setSize(nW, nH);
+  const pr = Math.min(devicePixelRatio, 2);
+  uniforms.u_resolution.value.set(nW*pr, nH*pr);
+});
+</script>
+</body>
+</html>
