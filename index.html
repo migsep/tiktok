@@ -173,59 +173,44 @@ async function loadFile(e) {
       /*
         VIDEO / SCREEN RECORDING PATH
 
-        Strategy A: decodeAudioData — fast, gives accurate pause/seek.
-          Works on most MP4 screen recordings. But iOS can "succeed" silently
-          and return an all-zero buffer, so we verify samples.
-        Strategy B (fallback): <audio> element + createMediaElementSource.
-          Lets Safari decode the container natively — handles HEVC .mov, etc.
-          Rules: no crossOrigin on blob, wait for canplay, resume actx first.
+        We go straight to <audio> + createMediaElementSource.
+        DO NOT use file.arrayBuffer() + decodeAudioData for videos:
+        on iOS Safari, loading a large video file (screen recording = several
+        hundred MB) into RAM via arrayBuffer() silently fails before completion,
+        causing the entire import to abort with no error message.
+
+        The <audio> element streams the file instead — no full RAM load needed.
+        Safari decodes the AAC track natively from the blob URL.
       */
+      isMediaEl = true;
       audioBuffer = null;
-      let decodedOk = false;
 
-      try {
-        const ab = await file.arrayBuffer();
-        const decoded = await actx.decodeAudioData(ab);
-        const ch = decoded.getChannelData(0);
-        const step = Math.max(1, Math.floor(ch.length / 200));
-        for (let i = 0; i < ch.length; i += step) {
-          if (Math.abs(ch[i]) > 0.001) { decodedOk = true; break; }
-        }
-        if (decodedOk) {
-          audioBuffer = decoded;
-          isMediaEl = false;
-          pausedAt = 0;
-          doPlay(0);
-        }
-      } catch (_) { /* fall through */ }
+      mediaEl = document.createElement('audio');
+      mediaEl.style.display = 'none';
+      document.body.appendChild(mediaEl);
 
-      if (!decodedOk) {
-        isMediaEl = true;
-        mediaEl = document.createElement('audio');
-        mediaEl.style.display = 'none';
-        document.body.appendChild(mediaEl);
+      // Set src first — iOS needs the blob URL attached before load()
+      mediaEl.src = URL.createObjectURL(file);
 
-        await new Promise((resolve, reject) => {
-          mediaEl.oncanplay = resolve;
-          mediaEl.onerror   = () => reject(new Error('Fichier non lisible sur cet appareil'));
-          mediaEl.src = URL.createObjectURL(file);
-          mediaEl.load();
-        });
+      await new Promise((resolve, reject) => {
+        mediaEl.oncanplay = resolve;
+        mediaEl.onerror   = () => reject(new Error('Fichier non lisible sur cet appareil'));
+        mediaEl.load();
+      });
 
-        const mediaSrc = actx.createMediaElementSource(mediaEl);
-        mediaSrc.connect(analyser);
-        analyser.connect(actx.destination);
+      const mediaSrc = actx.createMediaElementSource(mediaEl);
+      mediaSrc.connect(analyser);
+      analyser.connect(actx.destination);
 
-        mediaEl.onended = () => {
-          isPlaying = false;
-          document.getElementById('playPauseBtn').textContent = '▶';
-        };
+      mediaEl.onended = () => {
+        isPlaying = false;
+        document.getElementById('playPauseBtn').textContent = '▶';
+      };
 
-        await actx.resume();
-        await mediaEl.play();
-        isPlaying = true;
-        document.getElementById('playPauseBtn').textContent = '⏸';
-      }
+      await actx.resume();
+      await mediaEl.play();
+      isPlaying = true;
+      document.getElementById('playPauseBtn').textContent = '⏸';
 
     } else {
       // AUDIO FILE — decodeAudioData with accurate pause/seek
