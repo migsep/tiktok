@@ -164,91 +164,86 @@ async function loadFile(e) {
   ensureCtx();
   isMic = false;
 
-  const isVideo = file.type.startsWith('video/');
+  // iOS can return empty file.type for some formats — also check extension
+  const ext = file.name.split('.').pop().toLowerCase();
+  const isVideo = file.type.startsWith('video/') || ['mp4','mov','m4v'].includes(ext);
 
-  if (isVideo) {
-    /*
-      VIDEO PATH (screen recordings, .mp4, .mov)
+  try {
+    if (isVideo) {
+      /*
+        VIDEO / SCREEN RECORDING PATH
 
-      iOS Safari problems to avoid:
-      1. decodeAudioData on a video file often succeeds but returns SILENCE —
-         we detect this by checking if the decoded buffer has any non-zero samples.
-      2. createMediaElementSource with a <video> element is unreliable on iOS blobs.
-      3. An <audio> element handles MP4/AAC extraction far more reliably than <video>
-         on Safari iOS — we use that as our media element source.
-      4. No crossOrigin on blob URLs (breaks CORS check silently on Safari).
-      5. AudioContext must be explicitly resumed before play.
-    */
-    audioBuffer = null;
+        Strategy A: decodeAudioData — fast, gives accurate pause/seek.
+          Works on most MP4 screen recordings. But iOS can "succeed" silently
+          and return an all-zero buffer, so we verify samples.
+        Strategy B (fallback): <audio> element + createMediaElementSource.
+          Lets Safari decode the container natively — handles HEVC .mov, etc.
+          Rules: no crossOrigin on blob, wait for canplay, resume actx first.
+      */
+      audioBuffer = null;
+      let decodedOk = false;
 
-    // --- Try decodeAudioData and check for actual non-silent content ---
-    let decodedOk = false;
-    try {
+      try {
+        const ab = await file.arrayBuffer();
+        const decoded = await actx.decodeAudioData(ab);
+        const ch = decoded.getChannelData(0);
+        const step = Math.max(1, Math.floor(ch.length / 200));
+        for (let i = 0; i < ch.length; i += step) {
+          if (Math.abs(ch[i]) > 0.001) { decodedOk = true; break; }
+        }
+        if (decodedOk) {
+          audioBuffer = decoded;
+          isMediaEl = false;
+          pausedAt = 0;
+          doPlay(0);
+        }
+      } catch (_) { /* fall through */ }
+
+      if (!decodedOk) {
+        isMediaEl = true;
+        mediaEl = document.createElement('audio');
+        mediaEl.style.display = 'none';
+        document.body.appendChild(mediaEl);
+
+        await new Promise((resolve, reject) => {
+          mediaEl.oncanplay = resolve;
+          mediaEl.onerror   = () => reject(new Error('Fichier non lisible sur cet appareil'));
+          mediaEl.src = URL.createObjectURL(file);
+          mediaEl.load();
+        });
+
+        const mediaSrc = actx.createMediaElementSource(mediaEl);
+        mediaSrc.connect(analyser);
+        analyser.connect(actx.destination);
+
+        mediaEl.onended = () => {
+          isPlaying = false;
+          document.getElementById('playPauseBtn').textContent = '▶';
+        };
+
+        await actx.resume();
+        await mediaEl.play();
+        isPlaying = true;
+        document.getElementById('playPauseBtn').textContent = '⏸';
+      }
+
+    } else {
+      // AUDIO FILE — decodeAudioData with accurate pause/seek
+      isMediaEl = false;
       const ab = await file.arrayBuffer();
-      const decoded = await actx.decodeAudioData(ab);
-
-      // Check if the buffer actually has audio (not just silence)
-      const channelData = decoded.getChannelData(0);
-      let hasAudio = false;
-      const step = Math.floor(channelData.length / 200);
-      for (let i = 0; i < channelData.length; i += step) {
-        if (Math.abs(channelData[i]) > 0.001) { hasAudio = true; break; }
-      }
-
-      if (hasAudio) {
-        audioBuffer = decoded;
-        isMediaEl = false;
-        decodedOk = true;
-        pausedAt = 0;
-        doPlay(0);
-      }
-    } catch (e) { /* fall through to audio element */ }
-
-    if (!decodedOk) {
-      // --- Fallback: <audio> element (more reliable than <video> on iOS for audio) ---
-      isMediaEl = true;
-
-      mediaEl = document.createElement('audio');
-      mediaEl.style.display = 'none';
-      document.body.appendChild(mediaEl);
-
-      await new Promise((resolve, reject) => {
-        mediaEl.oncanplay = resolve;
-        mediaEl.onerror   = () => reject(new Error('Impossible de lire ce fichier vidéo'));
-        mediaEl.src = URL.createObjectURL(file);
-        mediaEl.load();
-      });
-
-      const mediaSrc = actx.createMediaElementSource(mediaEl);
-      mediaSrc.connect(analyser);
-      analyser.connect(actx.destination);
-
-      mediaEl.onended = () => {
-        isPlaying = false;
-        document.getElementById('playPauseBtn').textContent = '▶';
-      };
-
-      await actx.resume();
-      await mediaEl.play();
-      isPlaying = true;
-      document.getElementById('playPauseBtn').textContent = '⏸';
+      audioBuffer = await actx.decodeAudioData(ab);
+      pausedAt = 0;
+      doPlay(0);
     }
 
-  } else {
-    /*
-      AUDIO PATH — decodeAudioData is optimal for audio-only files
-      and gives us accurate seek/pause via BufferSource offset.
-    */
-    isMediaEl = false;
-    const ab = await file.arrayBuffer();
-    audioBuffer = await actx.decodeAudioData(ab);
-    pausedAt = 0;
-    doPlay(0);
-  }
+    setTrackName(file.name.replace(/\.[^.]+$/, '').toUpperCase());
+    hideUI();
+    showControls();
 
-  setTrackName(file.name.replace(/\.[^.]+$/, '').toUpperCase());
-  hideUI();
-  showControls();
+  } catch (err) {
+    alert('Impossible de charger ce fichier : ' + (err.message || err));
+    stopAll();
+  }
 }
 
 function doPlay(offset) {
