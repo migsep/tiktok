@@ -294,25 +294,27 @@ function doPlay(offset) {
 }
 
 function togglePlay() {
+  // Mic: stop everything and return to main UI
   if (isMic) { stopAll(); showUI(); return; }
 
+  // Video/audio element (streamed file)
   if (isMediaEl) {
-    if (!mediaEl) return;
-    ensureCtx();
+    if (!mediaEl) { showUI(); return; }
     if (isPlaying) {
       mediaEl.pause();
       isPlaying = false;
       document.getElementById('playPauseBtn').textContent = '▶';
     } else {
-      mediaEl.play();
+      actx.resume().then(() => mediaEl.play());
       isPlaying = true;
       document.getElementById('playPauseBtn').textContent = '⏸';
     }
     return;
   }
 
-  if (!audioBuffer) return;
-  ensureCtx();
+  // Decoded audio buffer
+  if (!audioBuffer) { showUI(); return; }
+  actx.resume();
   if (isPlaying) {
     pausedAt = actx.currentTime - startedAt;
     try { bufSrc.stop(); } catch(e){}
@@ -322,16 +324,27 @@ function togglePlay() {
 }
 
 async function startMic() {
-  stopAll(); await ensureCtx(); setupAnalyser(); isMic = true;
+  // stopAll first — ensures previous video/audio is fully stopped before mic starts
+  stopAll();
+  isMic = true;
   try {
+    // getUserMedia triggers iOS permission dialog — nothing should be playing at this point
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Permission granted — now set up audio context and connect
+    await ensureCtx();
+    setupAnalyser();
     const src = actx.createMediaStreamSource(micStream);
     src.connect(analyser);
     analyser.connect(actx.destination);
     isPlaying = true;
     setTrackName('LIVE MIC'); hideUI(); showControls();
     document.getElementById('playPauseBtn').textContent = '⏹';
-  } catch(err) { alert('Micro indisponible : ' + err.message); }
+  } catch(err) {
+    isMic = false;
+    if (err.name !== 'NotAllowedError') {
+      alert('Micro indisponible : ' + err.message);
+    }
+  }
 }
 
 function stopAll() {
