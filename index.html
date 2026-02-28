@@ -2,663 +2,641 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Audio Visualizer</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:wght@400;700&display=swap');
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  :root {
-    --c1: #ff006e;
-    --c2: #8338ec;
-    --c3: #3a86ff;
-    --c4: #ffbe0b;
-    --bg: #000000;
-  }
+  :root { --c1: #ff006e; --c2: #8338ec; --c3: #3a86ff; --c4: #06d6a0; }
 
   body {
-    background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100dvh;
-    overflow: hidden;
-    font-family: 'Space Mono', monospace;
-    color: #fff;
+    background: #000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100dvh; overflow: hidden;
+    font-family: 'Space Mono', monospace; color: #fff;
+    touch-action: manipulation;
   }
 
-  #canvas {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    z-index: 0;
-  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
 
   .ui {
-    position: fixed;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    transition: opacity 0.6s ease;
+    position: fixed; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 18px;
+    transition: opacity 0.5s; padding: 20px;
   }
-
-  .ui.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
+  .ui.hidden { opacity: 0; pointer-events: none; }
 
   .title {
     font-family: 'Bebas Neue', sans-serif;
-    font-size: clamp(2.5rem, 10vw, 4rem);
-    letter-spacing: 0.15em;
-    background: linear-gradient(135deg, var(--c1), var(--c2), var(--c3));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    text-align: center;
-    filter: drop-shadow(0 0 20px var(--c1));
-    animation: pulse-title 3s ease-in-out infinite;
+    font-size: clamp(2.8rem, 12vw, 5rem);
+    letter-spacing: 0.2em;
+    background: linear-gradient(135deg, var(--c1) 0%, var(--c2) 50%, var(--c3) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    filter: drop-shadow(0 0 24px #ff006e88);
   }
 
-  @keyframes pulse-title {
-    0%, 100% { filter: drop-shadow(0 0 20px var(--c1)); }
-    50% { filter: drop-shadow(0 0 40px var(--c2)); }
+  .mode-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .mode-btn {
+    padding: 7px 16px; border: 1px solid rgba(255,255,255,0.2); border-radius: 20px;
+    background: transparent; color: rgba(255,255,255,0.45);
+    font-family: 'Space Mono', monospace; font-size: 0.62rem;
+    letter-spacing: 0.06em; cursor: pointer; transition: all 0.2s;
+  }
+  .mode-btn.active {
+    border-color: var(--c1); color: #fff;
+    background: rgba(255,0,110,0.18); box-shadow: 0 0 12px rgba(255,0,110,0.35);
   }
 
-  .btn-group {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
+  .btn-group { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   .btn {
-    padding: 14px 28px;
-    border: 2px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: #fff;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-    transition: all 0.3s ease;
+    padding: 14px 26px; border: 2px solid transparent; border-radius: 4px;
+    background: transparent; color: #fff;
+    font-family: 'Space Mono', monospace; font-size: 0.72rem;
+    font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; cursor: pointer;
+    position: relative; overflow: hidden; transition: all 0.25s;
   }
-
   .btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
+    content: ''; position: absolute; inset: 0;
     background: linear-gradient(135deg, var(--c1), var(--c2));
-    opacity: 0.15;
-    transition: opacity 0.3s;
+    opacity: 0.12; transition: opacity 0.25s;
   }
+  .btn:hover::before { opacity: 0.3; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary  { border-color: var(--c1); box-shadow: 0 0 18px rgba(255,0,110,0.35); }
+  .btn-secondary{ border-color: var(--c2); box-shadow: 0 0 18px rgba(131,56,236,0.35); }
 
-  .btn:hover::before { opacity: 0.35; }
-
-  .btn-primary {
-    border-color: var(--c1);
-    box-shadow: 0 0 20px rgba(255,0,110,0.4), inset 0 0 20px rgba(255,0,110,0.1);
+  .palette-row { display: flex; gap: 12px; align-items: center; }
+  .pal {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid transparent; cursor: pointer; transition: transform 0.2s, border-color 0.2s;
   }
-
-  .btn-secondary {
-    border-color: var(--c2);
-    box-shadow: 0 0 20px rgba(131,56,236,0.4), inset 0 0 20px rgba(131,56,236,0.1);
-  }
-
-  .btn-accent {
-    border-color: var(--c3);
-    box-shadow: 0 0 20px rgba(58,134,255,0.4);
-  }
-
-  #fileInput { display: none; }
+  .pal:hover, .pal.active { transform: scale(1.25); border-color: #fff; }
+  .pal-neon    { background: linear-gradient(135deg, #ff006e, #8338ec); }
+  .pal-fire    { background: linear-gradient(135deg, #ff4d00, #ffbe0b); }
+  .pal-ocean   { background: linear-gradient(135deg, #00b4d8, #06d6a0); }
+  .pal-mono    { background: linear-gradient(135deg, #fff, #555); }
+  .pal-love    { background: linear-gradient(135deg, #ff1a75, #ffb3d1); }
+  .pal-drive   { background: linear-gradient(135deg, #6600ff, #ffffff); }
+  .pal-liminal { background: linear-gradient(135deg, #d4f0a0, #f7c59f); }
 
   .hint {
-    font-size: 0.65rem;
-    color: rgba(255,255,255,0.4);
-    letter-spacing: 0.05em;
-    text-align: center;
-    max-width: 280px;
-    line-height: 1.6;
+    font-size: 0.62rem; color: rgba(255,255,255,0.35);
+    letter-spacing: 0.04em; text-align: center; max-width: 300px; line-height: 1.7;
   }
 
-  /* Playing controls */
   .controls {
-    position: fixed;
-    bottom: 40px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
-    display: flex;
-    gap: 16px;
-    opacity: 0;
-    transition: opacity 0.4s ease;
+    position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; gap: 14px; align-items: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.4s;
   }
-
-  .controls.visible { opacity: 1; }
+  .controls.visible { opacity: 1; pointer-events: all; }
 
   .ctrl-btn {
-    width: 56px; height: 56px;
-    border-radius: 50%;
-    border: 2px solid rgba(255,255,255,0.2);
-    background: rgba(0,0,0,0.5);
-    backdrop-filter: blur(10px);
-    color: #fff;
-    font-size: 1.1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
+    width: 54px; height: 54px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(12px); color: #fff; font-size: 1.1rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.2s;
   }
-
-  .ctrl-btn:hover {
-    border-color: var(--c1);
-    box-shadow: 0 0 20px rgba(255,0,110,0.5);
-  }
-
-  /* Palette selector */
-  .palette-row {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .pal {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: transform 0.2s, border-color 0.2s;
-  }
-
-  .pal:hover, .pal.active {
-    transform: scale(1.2);
-    border-color: #fff;
-  }
-
-  .pal-neon { background: linear-gradient(135deg, #ff006e, #8338ec); }
-  .pal-fire { background: linear-gradient(135deg, #ff4d00, #ffbe0b); }
-  .pal-ocean { background: linear-gradient(135deg, #00b4d8, #06d6a0); }
-  .pal-mono { background: linear-gradient(135deg, #ffffff, #555); }
-
-  /* Mode selector */
-  .mode-row {
-    display: flex;
-    gap: 8px;
-  }
-
-  .mode-btn {
-    padding: 6px 14px;
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 20px;
-    background: transparent;
-    color: rgba(255,255,255,0.5);
-    font-family: 'Space Mono', monospace;
-    font-size: 0.6rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    letter-spacing: 0.05em;
-  }
-
-  .mode-btn.active {
-    border-color: var(--c1);
-    color: #fff;
-    background: rgba(255,0,110,0.15);
-  }
+  .ctrl-btn:hover { border-color: var(--c1); box-shadow: 0 0 16px rgba(255,0,110,0.5); }
+  .ctrl-btn:active { transform: scale(0.93); }
 
   .track-name {
-    position: fixed;
-    top: 30px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 1.2rem;
-    letter-spacing: 0.2em;
-    color: rgba(255,255,255,0.7);
-    opacity: 0;
-    transition: opacity 0.5s;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 80vw;
-    text-align: center;
+    position: fixed; top: 28px; left: 50%; transform: translateX(-50%); z-index: 10;
+    font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 0.22em;
+    color: rgba(255,255,255,0.6); opacity: 0; transition: opacity 0.5s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 80vw; text-align: center;
   }
-
   .track-name.visible { opacity: 1; }
+
+  #fileInput { display: none; }
 </style>
 </head>
 <body>
-
 <canvas id="canvas"></canvas>
 
 <div class="ui" id="ui">
   <div class="title">VISUALIZER</div>
 
   <div class="mode-row">
-    <button class="mode-btn active" onclick="setMode('radial')">RADIAL</button>
-    <button class="mode-btn" onclick="setMode('bars')">BARS</button>
-    <button class="mode-btn" onclick="setMode('wave')">WAVE</button>
-    <button class="mode-btn" onclick="setMode('galaxy')">GALAXY</button>
+    <button class="mode-btn active" data-mode="radial" onclick="setMode(this)">RADIAL</button>
+    <button class="mode-btn" data-mode="bars"   onclick="setMode(this)">BARS</button>
+    <button class="mode-btn" data-mode="wave"   onclick="setMode(this)">WAVE</button>
+    <button class="mode-btn" data-mode="galaxy" onclick="setMode(this)">GALAXY</button>
+    <button class="mode-btn" data-mode="bubble" onclick="setMode(this)">ORB</button>
   </div>
 
   <div class="btn-group">
-    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-      ⬆ Importer un son
-    </button>
-    <button class="btn btn-secondary" onclick="startMic()">
-      🎤 Micro live
-    </button>
+    <button class="btn btn-primary"   onclick="document.getElementById('fileInput').click()">⬆ Importer un son</button>
+    <button class="btn btn-secondary" onclick="startMic()">🎤 Micro live</button>
   </div>
 
   <div class="palette-row">
-    <div class="pal pal-neon active" onclick="setPalette('neon',this)" title="Neon"></div>
-    <div class="pal pal-fire" onclick="setPalette('fire',this)" title="Fire"></div>
-    <div class="pal pal-ocean" onclick="setPalette('ocean',this)" title="Ocean"></div>
-    <div class="pal pal-mono" onclick="setPalette('mono',this)" title="Mono"></div>
+    <div class="pal pal-neon    active" onclick="setPalette('neon',this)"    title="Neon"></div>
+    <div class="pal pal-fire"           onclick="setPalette('fire',this)"    title="Fire"></div>
+    <div class="pal pal-ocean"          onclick="setPalette('ocean',this)"   title="Ocean"></div>
+    <div class="pal pal-mono"           onclick="setPalette('mono',this)"    title="Mono"></div>
+    <div class="pal pal-love"           onclick="setPalette('love',this)"    title="Love"></div>
+    <div class="pal pal-drive"          onclick="setPalette('drive',this)"   title="Drive"></div>
+    <div class="pal pal-liminal"        onclick="setPalette('liminal',this)" title="Liminal"></div>
   </div>
 
-  <div class="hint">Importe un fichier audio ou utilise ton micro.<br>Enregistre ton écran et poste sur TikTok 🎵</div>
+  <div class="hint">Importe un fichier audio ou active le micro.<br>Enregistre l'écran et poste sur TikTok 🎵</div>
 </div>
 
 <div class="track-name" id="trackName"></div>
 
 <div class="controls" id="controls">
   <button class="ctrl-btn" id="playPauseBtn" onclick="togglePlay()">⏸</button>
+  <button class="ctrl-btn" id="toggleHideBtn" onclick="toggleAllUI()" title="Cacher/Montrer">👁</button>
   <button class="ctrl-btn" onclick="showUI()">✦</button>
 </div>
 
 <input type="file" id="fileInput" accept="audio/*" onchange="loadFile(event)">
 
 <script>
-// ---- State ----
+/* =====================================================
+   AUDIO ENGINE
+===================================================== */
+let actx, analyser, freqData, waveData;
+let bufSrc = null, audioBuffer = null, micStream = null;
+let isPlaying = false, isMic = false;
+let pausedAt = 0, startedAt = 0;
+
+function ensureCtx() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = actx.createAnalyser();
+    analyser.fftSize               = 1024;
+    analyser.smoothingTimeConstant = 0.5;
+    analyser.minDecibels           = -90;
+    analyser.maxDecibels           = -10;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    waveData = new Uint8Array(analyser.fftSize);
+    /* Do NOT connect analyser->destination for mic (no echo).
+       For file playback we add a GainNode to destination. */
+  }
+  actx.resume();
+}
+
+/* ---- File ---- */
+async function loadFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  stopAll();
+  ensureCtx();
+  isMic = false;
+
+  const ab = await file.arrayBuffer();
+  audioBuffer = await actx.decodeAudioData(ab);
+  pausedAt = 0;
+  doPlay(0);
+  setTrackName(file.name.replace(/\.[^.]+$/, '').toUpperCase());
+  hideUI();
+  showControls();
+}
+
+function doPlay(offset) {
+  if (!audioBuffer) return;
+  if (bufSrc) { try { bufSrc.disconnect(); bufSrc.stop(); } catch(e){} }
+
+  bufSrc = actx.createBufferSource();
+  bufSrc.buffer = audioBuffer;
+
+  /* file → analyser → speakers */
+  bufSrc.connect(analyser);
+  analyser.connect(actx.destination);
+
+  bufSrc.start(0, offset);
+  bufSrc.onended = () => {
+    isPlaying = false;
+    document.getElementById('playPauseBtn').textContent = '▶';
+  };
+  startedAt = actx.currentTime - offset;
+  isPlaying  = true;
+  document.getElementById('playPauseBtn').textContent = '⏸';
+}
+
+function togglePlay() {
+  if (isMic) { stopAll(); showUI(); return; }
+  if (!audioBuffer) return;
+  ensureCtx();
+  if (isPlaying) {
+    pausedAt = actx.currentTime - startedAt;
+    try { bufSrc.stop(); } catch(e){}
+    isPlaying = false;
+    document.getElementById('playPauseBtn').textContent = '▶';
+  } else {
+    doPlay(pausedAt);
+  }
+}
+
+/* ---- Mic ---- */
+async function startMic() {
+  stopAll();
+  ensureCtx();
+  isMic = true;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const src = actx.createMediaStreamSource(micStream);
+    src.connect(analyser);
+    /* analyser NOT connected to destination → no echo */
+    isPlaying = true;
+    setTrackName('LIVE MIC');
+    hideUI();
+    showControls();
+    document.getElementById('playPauseBtn').textContent = '⏹';
+  } catch(err) {
+    alert('Micro indisponible : ' + err.message);
+  }
+}
+
+function stopAll() {
+  if (bufSrc) { try { bufSrc.stop(); bufSrc.disconnect(); } catch(e){} bufSrc = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (analyser)  { try { analyser.disconnect(); } catch(e){} }
+  isPlaying = false; isMic = false;
+}
+
+/* =====================================================
+   RENDER ENGINE
+===================================================== */
 const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-let audioCtx, analyser, source, audioBuffer, gainNode;
-let animFrame;
-let isPlaying = false;
-let startedAt = 0, pausedAt = 0;
-let mode = 'radial';
-let palette = 'neon';
-let isMic = false;
+const ctx    = canvas.getContext('2d');
+let W, H, cx, cy, tick = 0;
 
-const palettes = {
-  neon:  ['#ff006e','#8338ec','#3a86ff','#06d6a0'],
-  fire:  ['#ff4d00','#ff8c00','#ffbe0b','#fff275'],
-  ocean: ['#00b4d8','#06d6a0','#0077b6','#90e0ef'],
-  mono:  ['#ffffff','#cccccc','#888888','#444444'],
-};
-
-function getColors() { return palettes[palette]; }
-
-// ---- Resize ----
 function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cx = W/2; cy = H/2;
 }
 window.addEventListener('resize', resize);
 resize();
 
-// ---- Audio setup ----
-function initAudioCtx() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    gainNode = audioCtx.createGain();
-    analyser.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-  }
-}
-
-// ---- File load ----
-function loadFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  isMic = false;
-  initAudioCtx();
-  const reader = new FileReader();
-  reader.onload = async (ev) => {
-    if (source) { try { source.stop(); } catch(e){} source.disconnect(); }
-    audioBuffer = await audioCtx.decodeAudioData(ev.target.result);
-    pausedAt = 0;
-    startPlayback();
-    const name = file.name.replace(/\.[^.]+$/, '').toUpperCase();
-    document.getElementById('trackName').textContent = name;
-    document.getElementById('trackName').classList.add('visible');
-    hideUI();
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function startPlayback(offset = 0) {
-  if (source) { try { source.stop(); } catch(e){} source.disconnect(); }
-  source = audioCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(analyser);
-  source.start(0, offset);
-  startedAt = audioCtx.currentTime - offset;
-  isPlaying = true;
-  document.getElementById('playPauseBtn').textContent = '⏸';
-  document.getElementById('controls').classList.add('visible');
-  if (!animFrame) draw();
-}
-
-function togglePlay() {
-  if (!audioBuffer) return;
-  if (isPlaying) {
-    pausedAt = audioCtx.currentTime - startedAt;
-    source.stop();
-    isPlaying = false;
-    document.getElementById('playPauseBtn').textContent = '▶';
-  } else {
-    startPlayback(pausedAt);
-  }
-}
-
-// ---- Mic ----
-async function startMic() {
-  isMic = true;
-  initAudioCtx();
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (source) { try { source.stop(); } catch(e){} source.disconnect(); }
-    source = audioCtx.createMediaStreamSource(stream);
-    source.connect(analyser);
-    gainNode.gain.value = 0; // no feedback
-    isPlaying = true;
-    document.getElementById('controls').classList.add('visible');
-    document.getElementById('trackName').textContent = 'LIVE MIC';
-    document.getElementById('trackName').classList.add('visible');
-    hideUI();
-    if (!animFrame) draw();
-  } catch(e) {
-    alert("Micro non disponible : " + e.message);
-  }
-}
-
-// ---- UI toggle ----
-let uiHidden = false;
-function hideUI() {
-  document.getElementById('ui').classList.add('hidden');
-  uiHidden = true;
-}
-function showUI() {
-  document.getElementById('ui').classList.remove('hidden');
-  uiHidden = false;
-}
-
-function setMode(m) {
-  mode = m;
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-}
-
-function setPalette(p, el) {
-  palette = p;
-  document.querySelectorAll('.pal').forEach(e => e.classList.remove('active'));
-  el.classList.add('active');
-}
-
-// ---- Drawing ----
-const dataArray = () => {
-  if (!analyser) return new Uint8Array(0);
-  const arr = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(arr);
-  return arr;
+let mode    = 'radial';
+let palette = 'neon';
+const PALETTES = {
+  neon:  ['#ff006e','#8338ec','#3a86ff','#06d6a0'],
+  fire:  ['#ff4d00','#ff8c00','#ffbe0b','#fffb69'],
+  ocean: ['#00b4d8','#06d6a0','#0077b6','#90e0ef'],
+  mono:  ['#ffffff','#cccccc','#888888','#333333'],
+  love:  ['#ff1a75','#ff6eb4','#ff0044','#ffb3d1'],   // rouge passion, rose tendre, carmin, pêche
+  drive:   ['#1a0533','#6600ff','#cc00ff','#ffffff'],   // violet nuit → pourpre électrique → blanc — concentration absolue
+  liminal: ['#d4f0a0','#fffde0','#b8e0d2','#f7c59f'],   // vert fluorescent pâle, jaune crème, teal délavé, pêche institutionnel
 };
+const cols = () => PALETTES[palette];
 
-const waveArray = () => {
-  if (!analyser) return new Uint8Array(0);
-  const arr = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(arr);
-  return arr;
-};
+/* smooth gradient color: t in [0,1] → interpolated hex between palette stops */
+function colAt(t) {
+  const c = cols();
+  const scaled = t * (c.length - 1);
+  const lo = Math.floor(scaled), hi = Math.min(lo + 1, c.length - 1);
+  return lerpHex(c[lo], c[hi], scaled - lo);
+}
+function lerpHex(a, b, t) {
+  const ar=parseInt(a.slice(1,3),16), ag=parseInt(a.slice(3,5),16), ab=parseInt(a.slice(5,7),16);
+  const br=parseInt(b.slice(1,3),16), bg=parseInt(b.slice(3,5),16), bb=parseInt(b.slice(5,7),16);
+  const r=Math.round(ar+(br-ar)*t), g=Math.round(ag+(bg-ag)*t), bv=Math.round(ab+(bb-ab)*t);
+  return '#'+[r,g,bv].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
 
 let particles = [];
-let time = 0;
+let orbFireBalls  = [];
+let orbPrevEnergy = 0;
+let orbCooldown   = 0;
+let orbSubHist    = null;
+let orbSubPrev    = 0;
 
-function draw() {
-  animFrame = requestAnimationFrame(draw);
-  const W = canvas.width, H = canvas.height;
-  time++;
+/* ---- single RAF loop ---- */
+function loop() {
+  requestAnimationFrame(loop);
+  tick++;
 
-  // Background fade
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(0,0,W,H);
 
-  if (!analyser) return;
+  if (!analyser || !isPlaying) { drawIdle(); return; }
 
-  const data = dataArray();
-  const cols = getColors();
-  const cx = W / 2, cy = H / 2;
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(waveData);
 
-  if (mode === 'radial') drawRadial(data, cols, W, H, cx, cy);
-  else if (mode === 'bars') drawBars(data, cols, W, H);
-  else if (mode === 'wave') drawWave(cols, W, H, cx, cy);
-  else if (mode === 'galaxy') drawGalaxy(data, cols, W, H, cx, cy);
-}
-
-function avg(data, start, end) {
-  let s = 0;
-  for (let i = start; i < end; i++) s += data[i];
-  return s / (end - start);
-}
-
-function drawRadial(data, cols, W, H, cx, cy) {
-  const len = data.length;
-  const baseR = Math.min(W, H) * 0.22;
-  const maxR = Math.min(W, H) * 0.42;
-  const bass = avg(data, 0, 8) / 255;
-
-  // Glow core
-  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * (1 + bass));
-  grd.addColorStop(0, cols[0] + '55');
-  grd.addColorStop(1, 'transparent');
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseR * (1 + bass * 0.8), 0, Math.PI * 2);
-  ctx.fillStyle = grd;
-  ctx.fill();
-
-  // Bars around circle
-  for (let i = 0; i < len; i++) {
-    const angle = (i / len) * Math.PI * 2 - Math.PI / 2;
-    const v = data[i] / 255;
-    const r1 = baseR;
-    const r2 = baseR + v * (maxR - baseR);
-    const x1 = cx + Math.cos(angle) * r1;
-    const y1 = cy + Math.sin(angle) * r1;
-    const x2 = cx + Math.cos(angle) * r2;
-    const y2 = cy + Math.sin(angle) * r2;
-
-    const ci = Math.floor((i / len) * cols.length);
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.strokeStyle = cols[ci % cols.length];
-    ctx.lineWidth = 2.5;
-    ctx.globalAlpha = 0.8 + v * 0.2;
-    ctx.shadowBlur = 12 + v * 20;
-    ctx.shadowColor = cols[ci % cols.length];
-    ctx.stroke();
+  switch (mode) {
+    case 'radial': drawRadial(); break;
+    case 'bars':   drawBars();   break;
+    case 'wave':   drawWave();   break;
+    case 'galaxy': drawGalaxy(); break;
+    case 'bubble': drawOrb(); break;
   }
+}
+loop();
 
-  // Mirror
-  for (let i = 0; i < len; i++) {
-    const angle = (i / len) * Math.PI * 2 - Math.PI / 2;
-    const v = data[i] / 255;
-    const r1 = baseR;
-    const r2 = baseR - v * (baseR * 0.6);
-    const x1 = cx + Math.cos(angle) * r1;
-    const y1 = cy + Math.sin(angle) * r1;
-    const x2 = cx + Math.cos(angle) * r2;
-    const y2 = cy + Math.sin(angle) * r2;
+/* ---- helpers ---- */
+function bandAvg(lo, hi) {
+  let s=0, end=Math.min(hi,freqData.length);
+  for(let i=lo;i<end;i++) s+=freqData[i];
+  return s/((end-lo)*255);
+}
+function glow(col,sz){ ctx.shadowBlur=sz; ctx.shadowColor=col; }
+function noGlow(){ ctx.shadowBlur=0; }
 
-    const ci = Math.floor((i / len) * cols.length);
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.strokeStyle = cols[(ci + 1) % cols.length];
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.4 + v * 0.3;
-    ctx.stroke();
+/* ---- IDLE ---- */
+function drawIdle() {
+  const c=cols(), t=tick/60;
+  for(let i=0;i<3;i++){
+    const r=60+i*55+Math.sin(t*1.2+i*1.3)*18;
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle=c[i%c.length]; ctx.lineWidth=1.5;
+    ctx.globalAlpha=0.18+Math.sin(t*2+i)*0.06;
+    glow(c[i%c.length],20); ctx.stroke();
   }
-
-  ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
+  ctx.globalAlpha=1; noGlow();
 }
 
-function drawBars(data, cols, W, H) {
-  const len = Math.min(data.length, 128);
-  const barW = W / len;
-  const bass = avg(data, 0, 8) / 255;
+/* ---- RADIAL (symmetric on vertical axis) ---- */
+function drawRadial() {
+  // Use only half the spectrum, mirror left ↔ right
+  const half = Math.floor(freqData.length / 2);
+  const base = Math.min(W,H)*0.20, max = Math.min(W,H)*0.44;
+  const bass = bandAvg(0,4);
 
-  for (let i = 0; i < len; i++) {
-    const v = data[i] / 255;
-    const bH = v * H * 0.85;
-    const x = i * barW;
-    const ci = Math.floor((i / len) * cols.length);
-    const col = cols[ci % cols.length];
+  const g = ctx.createRadialGradient(cx,cy,0,cx,cy,base*(1+bass*0.9));
+  g.addColorStop(0, cols()[0]+'55'); g.addColorStop(1,'transparent');
+  ctx.beginPath(); ctx.arc(cx,cy,base*(1+bass*0.8),0,Math.PI*2);
+  ctx.fillStyle=g; ctx.globalAlpha=1; ctx.fill();
 
-    // Bottom bar
-    const g = ctx.createLinearGradient(0, H, 0, H - bH);
-    g.addColorStop(0, col + 'ff');
-    g.addColorStop(1, col + '44');
-    ctx.fillStyle = g;
-    ctx.shadowBlur = 15 + v * 25;
-    ctx.shadowColor = col;
-    ctx.fillRect(x + 1, H - bH, barW - 2, bH);
+  for(let i=0;i<half;i++){
+    const v = freqData[i]/255;
+    const t = i/half; // 0..1 along half spectrum → gradient progress
+    const col = colAt(t);
+    // right side: angle goes from -π/2 (top) to π/2 (bottom)
+    const angleR = (t - 0.5) * Math.PI;
+    // left side: mirror
+    const angleL = Math.PI - angleR;
 
-    // Mirror top
-    ctx.globalAlpha = 0.3;
-    ctx.fillStyle = col;
-    ctx.fillRect(x + 1, 0, barW - 2, v * H * 0.4);
-    ctx.globalAlpha = 1;
-  }
-
-  ctx.shadowBlur = 0;
-}
-
-function drawWave(cols, W, H, cx, cy) {
-  const wave = waveArray();
-  const len = wave.length;
-
-  for (let layer = 0; layer < 3; layer++) {
-    ctx.beginPath();
-    for (let i = 0; i < len; i++) {
-      const x = (i / len) * W;
-      const offset = ((wave[i] / 128) - 1) * (80 + layer * 40);
-      const y = cy + offset + Math.sin(time * 0.02 + layer + i * 0.02) * 20;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    for(const angle of [angleR, angleL]) {
+      // outer bar
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(angle)*base, cy+Math.sin(angle)*base);
+      ctx.lineTo(cx+Math.cos(angle)*(base+v*(max-base)), cy+Math.sin(angle)*(base+v*(max-base)));
+      ctx.strokeStyle=col; ctx.lineWidth=2; ctx.globalAlpha=0.7+v*0.3;
+      glow(col,10+v*22); ctx.stroke();
+      // inner mirror
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(angle)*base, cy+Math.sin(angle)*base);
+      ctx.lineTo(cx+Math.cos(angle)*(base-v*base*0.5), cy+Math.sin(angle)*(base-v*base*0.5));
+      ctx.strokeStyle=col; ctx.lineWidth=1.2; ctx.globalAlpha=0.3+v*0.2;
+      glow(col,5); ctx.stroke();
     }
-    ctx.strokeStyle = cols[layer % cols.length];
-    ctx.lineWidth = 3 - layer * 0.5;
-    ctx.globalAlpha = 1 - layer * 0.2;
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = cols[layer % cols.length];
-    ctx.stroke();
   }
-
-  ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
+  ctx.globalAlpha=1; noGlow();
 }
 
-function drawGalaxy(data, cols, W, H, cx, cy) {
-  const len = data.length;
-  const bass = avg(data, 0, 8) / 255;
-  const mid  = avg(data, 8, 64) / 255;
-  const high = avg(data, 64, 256) / 255;
+/* ---- BARS ---- */
+function drawBars() {
+  const len = Math.min(freqData.length, 120);
+  const barW = W / len;
+  for(let i=0; i<len; i++){
+    const v   = freqData[i]/255;
+    const bH  = v*H*0.9, x = i*barW;
+    const col = colAt(i/len);
+    // vertical gradient: bright at top, dim at base
+    const g = ctx.createLinearGradient(0, H-bH, 0, H);
+    g.addColorStop(0, col);
+    g.addColorStop(1, col+'18');
+    ctx.fillStyle=g; ctx.globalAlpha=0.92;
+    glow(col, 14+v*28); ctx.fillRect(x+1, H-bH, barW-2, bH);
+    // top mirror reflection
+    ctx.globalAlpha=0.2; noGlow();
+    ctx.fillStyle=col; ctx.fillRect(x+1, 0, barW-2, v*H*0.32);
+  }
+  ctx.globalAlpha=1; noGlow();
+}
 
-  // Spawn particles
-  if (particles.length < 300 && Math.random() < 0.4 + bass * 0.6) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = (1 + bass * 4) * (Math.random() + 0.5);
-    const ci = Math.floor(Math.random() * cols.length);
+/* ---- WAVE ---- */
+function drawWave() {
+  const len=waveData.length, c=cols();
+  for(let layer=0;layer<4;layer++){
+    ctx.beginPath();
+    for(let i=0;i<=len;i++){
+      const x=(i/len)*W;
+      const raw=((waveData[i%len]/128)-1);
+      const y=cy+raw*(120+layer*50)+Math.sin(tick*0.025+layer*1.2+i*0.015)*(15+layer*8);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    const col=c[layer%c.length];
+    ctx.strokeStyle=col; ctx.lineWidth=3-layer*0.4;
+    ctx.globalAlpha=0.9-layer*0.18;
+    glow(col,18+layer*8); ctx.stroke();
+  }
+  ctx.globalAlpha=1; noGlow();
+}
+
+/* ---- GALAXY ---- */
+function drawGalaxy() {
+  const c=cols(), bass=bandAvg(0,4);
+  const spawnN=Math.floor(2+bass*14);
+  for(let s=0;s<spawnN;s++){
+    if(particles.length>=700) break;
+    const a=Math.random()*Math.PI*2;
+    const spd=0.8+bass*5+Math.random()*2;
     particles.push({
-      x: cx, y: cy,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 1,
-      decay: 0.006 + Math.random() * 0.012,
-      col: cols[ci],
-      size: 2 + Math.random() * 4 * bass,
+      x:cx,y:cy,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
+      life:1, decay:0.007+Math.random()*0.013,
+      col:c[Math.floor(Math.random()*c.length)],
+      size:1.5+Math.random()*3+bass*4
     });
   }
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vx*=1.015; p.vy*=1.015; p.life-=p.decay;
+    if(p.life<=0||p.x<-100||p.x>W+100||p.y<-100||p.y>H+100){particles.splice(i,1);continue;}
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+    ctx.fillStyle=p.col; ctx.globalAlpha=p.life*0.9;
+    glow(p.col,14); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(cx,cy,35+bass*90,0,Math.PI*2);
+  ctx.strokeStyle=c[0]; ctx.lineWidth=2+bass*6;
+  ctx.globalAlpha=0.55+bass*0.45;
+  glow(c[0],30+bass*50); ctx.stroke();
+  ctx.globalAlpha=1; noGlow();
+}
 
-  // Draw & update particles
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vx *= 1.01;
-    p.vy *= 1.01;
-    p.life -= p.decay;
+/* ---- ORB ---- */
+function drawOrb() {
+  const bass = bandAvg(0, 6);
+  const mid  = bandAvg(6, 60);
+  const high = bandAvg(60, 256);
+  const c    = cols();
+  const R    = Math.min(W, H) * (0.20 + bass * 0.08);
 
-    if (p.life <= 0 || p.x < -50 || p.x > W + 50 || p.y < -50 || p.y > H + 50) {
-      particles.splice(i, 1); continue;
+  /* ---- 1. outer corona / atmosphere ---- */
+  for(let layer = 3; layer >= 1; layer--) {
+    const coronaR = R * (1.3 + layer * 0.35 + bass * 0.4);
+    const gr = ctx.createRadialGradient(cx, cy, R * 0.8, cx, cy, coronaR);
+    gr.addColorStop(0,   c[0] + Math.round((0.18 + bass*0.12) * 255).toString(16).padStart(2,'0'));
+    gr.addColorStop(0.5, c[1] + '18');
+    gr.addColorStop(1,   c[2] + '00');
+    ctx.beginPath(); ctx.arc(cx, cy, coronaR, 0, Math.PI*2);
+    ctx.fillStyle = gr; ctx.globalAlpha = 1 / layer;
+    noGlow(); ctx.fill();
+  }
+
+  /* ---- 2. main orb body ---- */
+  const gBody = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+  gBody.addColorStop(0,    c[0] + 'ff');
+  gBody.addColorStop(0.4,  c[1] + 'dd');
+  gBody.addColorStop(0.75, c[2] + '99');
+  gBody.addColorStop(1,    '#000000cc');
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.fillStyle = gBody; ctx.globalAlpha = 0.92;
+  glow(c[0], 50 + bass * 80);
+  ctx.fill();
+
+  /* ---- 4. primary specular highlight ---- */
+  const hx = cx - R * 0.30, hy = cy - R * 0.32;
+  const gSpec = ctx.createRadialGradient(hx, hy, 0, hx, hy, R * 0.45);
+  gSpec.addColorStop(0,   '#ffffff' + Math.round((0.75 + high * 0.25) * 255).toString(16).padStart(2,'0'));
+  gSpec.addColorStop(0.4, '#ffffff22');
+  gSpec.addColorStop(1,   '#ffffff00');
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.fillStyle = gSpec; ctx.globalAlpha = 1; noGlow(); ctx.fill();
+
+  /* ---- 5. secondary glow spot ---- */
+  const gx = cx + R * 0.25, gy = cy + R * 0.28;
+  const gSpec2 = ctx.createRadialGradient(gx, gy, 0, gx, gy, R * 0.4);
+  gSpec2.addColorStop(0, c[3 % c.length] + Math.round((0.5 + high*0.4)*255).toString(16).padStart(2,'0'));
+  gSpec2.addColorStop(1, c[3 % c.length] + '00');
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.fillStyle = gSpec2; ctx.globalAlpha = 0.6 + high * 0.3;
+  glow(c[3 % c.length], 10); ctx.fill();
+
+  /* ---- 6. fire balls — isolated sub-bass onset ---- */
+  // Only watch the very lowest bins (kick drum lives here, 20-80hz)
+  const subBass = bandAvg(0, 5);
+
+  // Rolling min/max over ~40 frames to normalize against current mix loudness
+  if (!orbSubHist) orbSubHist = new Float32Array(40).fill(subBass);
+  orbSubHist.copyWithin(1, 0);
+  orbSubHist[0] = subBass;
+  const subMin = Math.min(...orbSubHist);
+  const subMax = Math.max(...orbSubHist);
+  const subRange = subMax - subMin;
+
+  // Normalized position within recent dynamic range (0=quiet, 1=loudest recent)
+  const subNorm = subRange > 0.01 ? (subBass - subMin) / subRange : 0;
+
+  // Derivative on normalized value — catches the sharp rise at beat onset
+  const subRise = subNorm - (orbSubPrev || 0);
+  orbSubPrev = subNorm;
+
+  orbCooldown = Math.max(0, orbCooldown - 1);
+  if (subRise > 0.25 && subNorm > 0.5 && orbCooldown === 0) {
+    orbCooldown = 10;
+    const intensity = subNorm * subRise * 4;
+    const absScale  = Math.min(subBass * 4, 1); // 0→1 based on actual loudness
+    const count = Math.floor(3 + intensity * 8);
+    for (let k = 0; k < Math.min(count, 12); k++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2.5 + intensity * 5 + Math.random() * 2;
+      const size  = (4 + intensity * 10 + Math.random() * 5) * (0.3 + absScale * 0.7);
+      orbFireBalls.push({
+        x:  cx + Math.cos(angle) * (R * 0.95),
+        y:  cy + Math.sin(angle) * (R * 0.95),
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life:  1,
+        decay: 0.016 + Math.random() * 0.018,
+        size,
+        col1: c[0],
+        col2: c[1 % c.length],
+      });
     }
+  }
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-    ctx.fillStyle = p.col;
-    ctx.globalAlpha = p.life;
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = p.col;
+  // Draw & update fire balls
+  for(let i = orbFireBalls.length - 1; i >= 0; i--) {
+    const fb = orbFireBalls[i];
+    fb.x += fb.vx; fb.y += fb.vy;
+    fb.vx *= 0.97;  fb.vy *= 0.97;   // slight drag
+    fb.life -= fb.decay;
+    if(fb.life <= 0) { orbFireBalls.splice(i, 1); continue; }
+
+    const r = fb.size * fb.life;
+
+    // outer flame glow
+    const gf = ctx.createRadialGradient(fb.x, fb.y, 0, fb.x, fb.y, r * 2.2);
+    gf.addColorStop(0,   fb.col1 + 'ff');
+    gf.addColorStop(0.3, fb.col2 + 'cc');
+    gf.addColorStop(0.7, fb.col2 + '44');
+    gf.addColorStop(1,   fb.col2 + '00');
+    ctx.beginPath(); ctx.arc(fb.x, fb.y, r * 2.2, 0, Math.PI*2);
+    ctx.fillStyle   = gf;
+    ctx.globalAlpha = fb.life * 0.85;
+    glow(fb.col1, 20 + fb.size * 0.8);
     ctx.fill();
+
+    // hot white core
+    const gc = ctx.createRadialGradient(fb.x, fb.y, 0, fb.x, fb.y, r * 0.55);
+    gc.addColorStop(0, '#ffffffee');
+    gc.addColorStop(1, fb.col1 + '00');
+    ctx.beginPath(); ctx.arc(fb.x, fb.y, r * 0.55, 0, Math.PI*2);
+    ctx.fillStyle   = gc;
+    ctx.globalAlpha = fb.life;
+    noGlow(); ctx.fill();
   }
 
-  // Central ring
-  ctx.beginPath();
-  ctx.arc(cx, cy, 40 + bass * 80, 0, Math.PI * 2);
-  ctx.strokeStyle = cols[0];
-  ctx.lineWidth = 3 + bass * 5;
-  ctx.globalAlpha = 0.6 + bass * 0.4;
-  ctx.shadowBlur = 30 + bass * 40;
-  ctx.shadowColor = cols[0];
-  ctx.stroke();
-
-  ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1; noGlow();
 }
 
-// Idle animation
-function idleLoop() {
-  if (analyser && isPlaying) return;
-  animFrame = requestAnimationFrame(idleLoop);
-  const W = canvas.width, H = canvas.height;
-  ctx.fillStyle = 'rgba(0,0,0,0.05)';
-  ctx.fillRect(0, 0, W, H);
+/* =====================================================
+   UI
+===================================================== */
+function setMode(btn) {
+  mode=btn.dataset.mode;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  particles=[];
+}
+function setPalette(p,el) {
+  palette=p;
+  document.querySelectorAll('.pal').forEach(e=>e.classList.remove('active'));
+  el.classList.add('active');
+}
+function hideUI()      { document.getElementById('ui').classList.add('hidden'); }
+function showUI()      { document.getElementById('ui').classList.remove('hidden'); }
+function showControls(){ document.getElementById('controls').classList.add('visible'); }
+function setTrackName(n) {
+  const el=document.getElementById('trackName');
+  el.textContent=n; el.classList.add('visible');
+}
 
-  const cx = W/2, cy = H/2;
-  const cols = getColors();
-  const t = Date.now() / 1000;
-
-  for (let i = 0; i < 3; i++) {
-    const r = 80 + i * 50 + Math.sin(t + i) * 20;
-    const alpha = 0.15 + i * 0.05;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = cols[i % cols.length];
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = alpha + Math.sin(t * 2 + i) * 0.05;
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = cols[i % cols.length];
-    ctx.stroke();
+/* ---- Hide/show everything for clean recording ---- */
+let allHidden = false;
+function toggleAllUI() {
+  allHidden = !allHidden;
+  const controls  = document.getElementById('controls');
+  const trackName = document.getElementById('trackName');
+  if (allHidden) {
+    controls.style.opacity  = '0';
+    controls.style.pointerEvents = 'none';
+    trackName.style.opacity = '0';
+  } else {
+    controls.style.opacity  = '';
+    controls.style.pointerEvents = '';
+    trackName.style.opacity = '';
   }
-  ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
 }
 
-idleLoop();
+// Tap anywhere on canvas to toggle
+canvas.addEventListener('click', (e) => {
+  // Ignore if the tap was on a button
+  if (e.target !== canvas) return;
+  if (isPlaying) toggleAllUI();
+});
 </script>
 </body>
 </html>
