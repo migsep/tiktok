@@ -95,6 +95,9 @@
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div id="media-container" style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;top:-2px;left:-2px;"></div>
+<!-- Media elements must NOT be display:none on iOS Safari — use off-screen container -->
+<div id="media-container" style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;top:-2px;left:-2px;"></div>
 
 <div class="ui" id="ui">
   <div class="title">VISUALIZER</div>
@@ -185,30 +188,33 @@ async function loadFile(e) {
       isMediaEl = true;
       audioBuffer = null;
 
-      mediaEl = document.createElement('audio');
-      mediaEl.style.display = 'none';
-      document.body.appendChild(mediaEl);
+      const objUrl = URL.createObjectURL(file);
+      mediaEl = document.createElement('video');
+      mediaEl.setAttribute('playsinline', '');
+      mediaEl.setAttribute('webkit-playsinline', '');
+      mediaEl.playsInline = true;
+      mediaEl.crossOrigin = 'anonymous';
+      mediaEl.volume = 1.0;
+      mediaEl.src = objUrl;
+      // Off-screen container — NOT display:none (iOS Safari blocks playback with display:none)
+      document.getElementById('media-container').appendChild(mediaEl);
 
-      // Set src first — iOS needs the blob URL attached before load()
-      mediaEl.src = URL.createObjectURL(file);
+      // play() FIRST, then connect to Web Audio (iOS Safari requirement)
+      await mediaEl.play();
 
-      await new Promise((resolve, reject) => {
-        mediaEl.oncanplay = resolve;
-        mediaEl.onerror   = () => reject(new Error('Fichier non lisible sur cet appareil'));
-        mediaEl.load();
-      });
-
-      const mediaSrc = actx.createMediaElementSource(mediaEl);
-      mediaSrc.connect(analyser);
-      analyser.connect(actx.destination);
+      try {
+        const mediaSrc = actx.createMediaElementSource(mediaEl);
+        mediaSrc.connect(analyser);
+        analyser.connect(actx.destination);
+      } catch(err) {
+        console.warn('Web Audio connect:', err);
+      }
 
       mediaEl.onended = () => {
         isPlaying = false;
         document.getElementById('playPauseBtn').textContent = '▶';
       };
 
-      await actx.resume();
-      await mediaEl.play();
       isPlaying = true;
       document.getElementById('playPauseBtn').textContent = '⏸';
 
