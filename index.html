@@ -324,15 +324,14 @@ function togglePlay() {
 }
 
 async function startMic() {
-  // stopAll first — ensures previous video/audio is fully stopped before mic starts
   stopAll();
   isMic = true;
   try {
-    // getUserMedia triggers iOS permission dialog — nothing should be playing at this point
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    // Permission granted — now set up audio context and connect
+    // ensureCtx BEFORE getUserMedia — AudioContext must be created in the
+    // user-gesture window, which closes once we await getUserMedia()
     await ensureCtx();
     setupAnalyser();
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     const src = actx.createMediaStreamSource(micStream);
     src.connect(analyser);
     analyser.connect(actx.destination);
