@@ -139,76 +139,82 @@
    AUDIO ENGINE
 ===================================================== */
 let actx, analyser, freqData, waveData;
-let bufSrc      = null;    // BufferSource — for decoded audio files
-let mediaEl     = null;    // HTMLVideoElement — for video files (iOS-safe)
+let bufSrc      = null;
+let mediaEl     = null;
+let currentObjUrl = null;
 let audioBuffer = null;
 let micStream   = null;
 let isPlaying = false, isMic = false, isMediaEl = false;
 let pausedAt  = 0, startedAt = 0;
 
-function ensureCtx() {
-  if (!actx) {
+const setupAnalyser = () => {
+  if (analyser) { try { analyser.disconnect(); } catch(_){} }
+  analyser = actx.createAnalyser();
+  analyser.fftSize               = 512;
+  analyser.smoothingTimeConstant = 0.5;
+  analyser.minDecibels           = -90;
+  analyser.maxDecibels           = -10;
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  waveData = new Uint8Array(analyser.fftSize);
+};
+
+// Must be async and awaited inside a user-gesture handler on iOS Safari
+const ensureCtx = async () => {
+  if (!actx || actx.state === 'closed') {
     actx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = actx.createAnalyser();
-    analyser.fftSize               = 512;
-    analyser.smoothingTimeConstant = 0.5;
-    analyser.minDecibels           = -90;
-    analyser.maxDecibels           = -10;
-    freqData = new Uint8Array(analyser.frequencyBinCount);
-    waveData = new Uint8Array(analyser.fftSize);
   }
-  actx.resume();
-}
+  if (actx.state === 'suspended') await actx.resume();
+};
 
 async function loadFile(e) {
   const file = e.target.files[0];
   if (!file) return;
   stopAll();
-  ensureCtx();
   isMic = false;
 
-  // iOS can return empty file.type for some formats — also check extension
   const ext = file.name.split('.').pop().toLowerCase();
-  const isVideo = file.type.startsWith('video/') || ['mp4','mov','m4v'].includes(ext);
+  const isVideo = file.type.startsWith('video/') || ['mp4','mov','m4v','webm','mkv'].includes(ext);
 
   try {
+    // ensureCtx MUST be awaited first, while still in the user-gesture callstack
+    // Any await before actx.resume() breaks iOS Safari's autoplay policy
+    await ensureCtx();
+    setupAnalyser();
+
     if (isVideo) {
       /*
-        VIDEO / SCREEN RECORDING PATH
-
-        We go straight to <audio> + createMediaElementSource.
-        DO NOT use file.arrayBuffer() + decodeAudioData for videos:
-        on iOS Safari, loading a large video file (screen recording = several
-        hundred MB) into RAM via arrayBuffer() silently fails before completion,
-        causing the entire import to abort with no error message.
-
-        The <audio> element streams the file instead — no full RAM load needed.
-        Safari decodes the AAC track natively from the blob URL.
+        iOS Safari rules for video playback (from working reference):
+        1. Element must be in DOM and NOT display:none (off-screen container)
+        2. play() must be called while still in user-gesture context
+        3. Web Audio connection AFTER play()
+        4. playsinline + webkit-playsinline mandatory
       */
       isMediaEl = true;
       audioBuffer = null;
 
-      const objUrl = URL.createObjectURL(file);
+      if (currentObjUrl) { try { URL.revokeObjectURL(currentObjUrl); } catch(_){} }
+      currentObjUrl = URL.createObjectURL(file);
+
       mediaEl = document.createElement('video');
       mediaEl.setAttribute('playsinline', '');
       mediaEl.setAttribute('webkit-playsinline', '');
       mediaEl.playsInline = true;
       mediaEl.crossOrigin = 'anonymous';
       mediaEl.volume = 1.0;
-      mediaEl.src = objUrl;
-      // Off-screen container — NOT display:none (iOS Safari blocks playback with display:none)
+      mediaEl.muted = false;
+      mediaEl.src = currentObjUrl;
       document.getElementById('media-container').appendChild(mediaEl);
 
-      // play() FIRST, then connect to Web Audio (iOS Safari requirement)
-      await mediaEl.play();
-
-      try {
-        const mediaSrc = actx.createMediaElementSource(mediaEl);
-        mediaSrc.connect(analyser);
-        analyser.connect(actx.destination);
-      } catch(err) {
-        console.warn('Web Audio connect:', err);
+      // play() first — while still in user-gesture context
+      try { await mediaEl.play(); } catch(err) {
+        throw new Error('Lecture impossible : ' + err.message);
       }
+
+      // Connect to Web Audio after play()
+      try {
+        actx.createMediaElementSource(mediaEl).connect(analyser);
+        analyser.connect(actx.destination);
+      } catch(err) { console.warn('Web Audio connect:', err); }
 
       mediaEl.onended = () => {
         isPlaying = false;
@@ -219,12 +225,43 @@ async function loadFile(e) {
       document.getElementById('playPauseBtn').textContent = '⏸';
 
     } else {
-      // AUDIO FILE — decodeAudioData with accurate pause/seek
+      /*
+        AUDIO PATH
+        For large files (>80MB): stream via <audio> element
+        For small files: decodeAudioData for accurate pause/seek
+      */
       isMediaEl = false;
-      const ab = await file.arrayBuffer();
-      audioBuffer = await actx.decodeAudioData(ab);
-      pausedAt = 0;
-      doPlay(0);
+
+      if (file.size > 80 * 1024 * 1024) {
+        // Large file — stream like video
+        isMediaEl = true;
+        if (currentObjUrl) { try { URL.revokeObjectURL(currentObjUrl); } catch(_){} }
+        currentObjUrl = URL.createObjectURL(file);
+        mediaEl = document.createElement('audio');
+        mediaEl.src = currentObjUrl;
+        document.getElementById('media-container').appendChild(mediaEl);
+        try { await mediaEl.play(); } catch(err) {
+          throw new Error('Lecture impossible : ' + err.message);
+        }
+        try {
+          actx.createMediaElementSource(mediaEl).connect(analyser);
+          analyser.connect(actx.destination);
+        } catch(err) { console.warn('Web Audio connect:', err); }
+        mediaEl.onended = () => {
+          isPlaying = false;
+          document.getElementById('playPauseBtn').textContent = '▶';
+        };
+        isPlaying = true;
+        document.getElementById('playPauseBtn').textContent = '⏸';
+
+      } else {
+        // Small file — decodeAudioData
+        const ab = await file.arrayBuffer();
+        audioBuffer = await actx.decodeAudioData(ab);
+        analyser.connect(actx.destination);
+        pausedAt = 0;
+        doPlay(0);
+      }
     }
 
     setTrackName(file.name.replace(/\.[^.]+$/, '').toUpperCase());
@@ -285,11 +322,12 @@ function togglePlay() {
 }
 
 async function startMic() {
-  stopAll(); ensureCtx(); isMic = true;
+  stopAll(); await ensureCtx(); setupAnalyser(); isMic = true;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     const src = actx.createMediaStreamSource(micStream);
     src.connect(analyser);
+    analyser.connect(actx.destination);
     isPlaying = true;
     setTrackName('LIVE MIC'); hideUI(); showControls();
     document.getElementById('playPauseBtn').textContent = '⏹';
@@ -299,9 +337,10 @@ async function startMic() {
 function stopAll() {
   if (bufSrc)  { try { bufSrc.stop(); bufSrc.disconnect(); } catch(e){} bufSrc = null; }
   if (mediaEl) {
-    try { mediaEl.pause(); URL.revokeObjectURL(mediaEl.src); mediaEl.remove(); } catch(e){}
+    try { mediaEl.pause(); mediaEl.src = ''; if (mediaEl.parentNode) mediaEl.parentNode.removeChild(mediaEl); } catch(e){}
     mediaEl = null;
   }
+  if (currentObjUrl) { try { URL.revokeObjectURL(currentObjUrl); } catch(e){} currentObjUrl = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
   if (analyser)  { try { analyser.disconnect(); } catch(e){} }
   isPlaying = false; isMic = false; isMediaEl = false; audioBuffer = null;
