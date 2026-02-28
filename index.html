@@ -168,32 +168,60 @@ async function loadFile(e) {
 
   if (isVideo) {
     /*
-      VIDEO PATH — use createMediaElementSource so Safari decodes
-      the video natively (handles HEVC .mov, H.264 .mp4, AAC audio).
-      decodeAudioData would fail or return silence on many iOS video formats.
+      VIDEO PATH — two strategies depending on what Safari can decode:
+
+      Strategy A (preferred for screen recordings / MP4+AAC):
+        decodeAudioData — extracts audio track directly into a buffer.
+        Gives us accurate pause/seek. Works on MP4 screen recordings.
+
+      Strategy B (fallback for HEVC .mov or exotic formats):
+        createMediaElementSource — lets Safari decode natively.
+        Less reliable on local blobs in Safari iOS but handles more codecs.
     */
-    isMediaEl = true;
     audioBuffer = null;
 
-    mediaEl = document.createElement('video');
-    mediaEl.src = URL.createObjectURL(file);
-    mediaEl.crossOrigin = 'anonymous';
-    mediaEl.playsInline = true;
-    mediaEl.style.display = 'none';
-    document.body.appendChild(mediaEl);
+    let decodedOk = false;
+    try {
+      const ab = await file.arrayBuffer();
+      const decoded = await actx.decodeAudioData(ab);
+      // If we get here, the MP4 audio track was decoded successfully
+      audioBuffer = decoded;
+      isMediaEl = false;
+      decodedOk = true;
+      pausedAt = 0;
+      doPlay(0);
+    } catch (decodeErr) {
+      // Strategy B — fallback to MediaElementSource (HEVC, exotic formats)
+      decodedOk = false;
+    }
 
-    const mediaSrc = actx.createMediaElementSource(mediaEl);
-    mediaSrc.connect(analyser);
-    analyser.connect(actx.destination);
+    if (!decodedOk) {
+      isMediaEl = true;
 
-    mediaEl.onended = () => {
-      isPlaying = false;
-      document.getElementById('playPauseBtn').textContent = '▶';
-    };
+      mediaEl = document.createElement('video');
+      mediaEl.playsInline = true;
+      mediaEl.style.display = 'none';
+      document.body.appendChild(mediaEl);
 
-    await mediaEl.play();
-    isPlaying = true;
-    document.getElementById('playPauseBtn').textContent = '⏸';
+      await new Promise((resolve, reject) => {
+        mediaEl.onloadedmetadata = resolve;
+        mediaEl.onerror = () => reject(new Error('Impossible de charger la vidéo'));
+        mediaEl.src = URL.createObjectURL(file);
+      });
+
+      const mediaSrc = actx.createMediaElementSource(mediaEl);
+      mediaSrc.connect(analyser);
+      analyser.connect(actx.destination);
+
+      mediaEl.onended = () => {
+        isPlaying = false;
+        document.getElementById('playPauseBtn').textContent = '▶';
+      };
+
+      await mediaEl.play();
+      isPlaying = true;
+      document.getElementById('playPauseBtn').textContent = '⏸';
+    }
 
   } else {
     /*
